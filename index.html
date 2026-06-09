@@ -385,12 +385,11 @@ function parseCSV(csv) {
 // ── FETCH SHEETS ──
 async function loadData() {
   try {
-    const [jugRes, fixRes, statsRes] = await Promise.all([
-      fetch(SHEET_URL('Jugadores')),
-      fetch(SHEET_URL('Fixture')),
-      fetch(SHEET_URL('Stats'))
+    const [jugCsv, fixCsv, statsCsv] = await Promise.all([
+      fetchSheet('Jugadores'),
+      fetchSheet('Fixture'),
+      fetchSheet('Stats')
     ]);
-    const [jugCsv, fixCsv, statsCsv] = await Promise.all([jugRes.text(), fixRes.text(), statsRes.text()]);
 
     players = parseCSV(jugCsv).map(p => ({
       name: (p.nombre || '').toUpperCase(),
