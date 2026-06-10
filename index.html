@@ -383,6 +383,26 @@ function parseCSV(csv) {
 }
 
 // ── FETCH SHEETS ──
+async function fetchSheet(sheet) {
+  const gid = SHEET_GIDS[sheet] || '0';
+  const urls = [
+    `https://docs.google.com/spreadsheets/d/e/${PUB_ID}/pub?gid=${gid}&single=true&output=csv`,
+    `https://docs.google.com/spreadsheets/d/e/${PUB_ID}/pub?output=csv&sheet=${encodeURIComponent(sheet)}`,
+    `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:csv&sheet=${encodeURIComponent(sheet)}`,
+  ];
+  for (const url of urls) {
+    try {
+      const r = await fetch(url);
+      if (r.ok) {
+        const t = await r.text();
+        if (t.length > 10 && !t.includes('<html')) return t;
+      }
+    } catch(e) { console.warn('Failed:', url, e); }
+  }
+  console.error('All URLs failed for sheet:', sheet);
+  return '';
+}
+
 async function loadData() {
   try {
     const [jugCsv, fixCsv, statsCsv] = await Promise.all([
