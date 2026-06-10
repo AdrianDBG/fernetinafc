@@ -351,7 +351,7 @@ footer a:hover{color:var(--white);}
 <script>
 // ── CONFIG ──
 const SHEET_ID = '1GeXuwZohWiYxrf6D1OtkCbLObR0mal_il4QqKvTza-M';
-const SHEET_URL = (sheet) => `https://docs.google.com/spreadsheets/d/$1GeXuwZohWiYxrf6D1OtkCbLObR0mal_il4QqKvTza-M/gviz/tq?tqx=out:csv&sheet=${encodeURIComponent(sheet)}`;
+const SHEET_URL = (sheet) => `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:csv&sheet=${encodeURIComponent(sheet)}`;
 const PASSWORD = 'treintasetenta';
 
 // ── STATE ──
@@ -390,6 +390,12 @@ async function loadData() {
       fetchSheet('Fixture'),
       fetchSheet('Stats')
     ]);
+    if (!jugCsv || jugCsv.length < 10) {
+      console.error('No se pudo cargar la hoja Jugadores');
+      document.getElementById('loadingOverlay').classList.add('hidden');
+      document.getElementById('squadGrid').innerHTML = '<div style="padding:40px;text-align:center;color:var(--white3);">No se pudieron cargar los datos. Verificá que la planilla esté publicada.</div>';
+      return;
+    }
 
     players = parseCSV(jugCsv).map(p => ({
       name: (p.nombre || '').toUpperCase(),
