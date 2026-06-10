@@ -94,6 +94,7 @@ header{position:sticky;top:0;z-index:100;background:rgba(10,10,10,0.95);backdrop
 .phys-lbl{font-size:9px;font-weight:500;letter-spacing:0.12em;text-transform:uppercase;color:var(--white3);margin-top:2px;}
 .card-match-stats{display:none;padding:12px 16px;border-top:1px solid rgba(255,255,255,0.06);}
 .card-match-stats.open{display:block;animation:fadeUp 0.2s ease both;}
+.card-expanded{border-color:rgba(107,15,26,0.6);box-shadow:0 16px 48px rgba(107,15,26,0.35),0 4px 12px rgba(0,0,0,0.5);}
 
 /* FIXTURE */
 .fixture-view{max-width:760px;margin:0 auto;padding:32px 28px 60px;}
@@ -277,6 +278,11 @@ footer a:hover{color:var(--white);}
 // ── CONFIG ──
 const SHEETDB_URL = 'https://sheetdb.io/api/v1/fojmvhxpjgi1m';
 
+// Normalize names: remove accents, lowercase, trim extra spaces
+function normName(s) {
+  return (s || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().trim().replace(/\s+/g, ' ');
+}
+
 // ── STATE ──
 let players = [];
 let matches = [];
@@ -315,55 +321,70 @@ async function loadData() {
       height: p.altura || '',
       weight: p.peso || '',
       label: p.apodo || '',
+      injured: (p.lesionado || '').toLowerCase().trim() === 'si' || (p.lesionado || '').toLowerCase().trim() === 'sí',
     })).filter(p => p.name);
 
     matches = (fixData || []).map(m => ({
       date: m.fecha || '',
       rival: m.rival || '',
-      score: (m.goles_nuestros && m.goles_rival) ? `${m.goles_nuestros} - ${m.goles_rival}` : null,
+      score: (m.goles_nuestros && m.goles_rival) ? `${m.goles_nuestros} - ${m.goles_rival}` : (m.resultado || null),
+      goalsFor:  parseInt(m.goles_nuestros) || 0,
+      goalsAgainst: parseInt(m.goles_rival) || 0,
       result: m.estado || 'pending',
       scorers: m.goles ? m.goles.split(',').map(s => s.trim()).filter(Boolean) : [],
       assists: m.asistencias ? m.asistencias.split(',').map(s => s.trim()).filter(Boolean) : [],
       mvp: m.mvp || '',
     })).filter(m => m.rival);
 
-    // Build statsMap from Fixture data automatically
-    statsMap = {};
+    // Build statsMap keyed by normalized name
+    const rawStats = {};
 
     matches.forEach(m => {
       const r3 = (m.result||'').toLowerCase().trim();
       if (r3 === 'pending' || r3 === 'pendiente' || r3 === 'suspended' || r3 === 'suspendido') return;
 
-      // Goals
+      // Goals — supports "NOMBRE x2" or "NOMBRE"
       (m.scorers || []).forEach(s => {
-        const parts = s.split(' x');
-        const name  = parts[0].trim().toUpperCase();
+        if (!s.trim()) return;
+        const parts = s.trim().split(/\s+x\s*/i);
+        const key   = normName(parts[0]);
         const count = parseInt(parts[1]) || 1;
-        if (!statsMap[name]) statsMap[name] = { goals:0, assists:0, mvp:0 };
-        statsMap[name].goals += count;
+        if (!key) return;
+        if (!rawStats[key]) rawStats[key] = { goals:0, assists:0, mvp:0 };
+        rawStats[key].goals += count;
       });
 
       // Assists
       (m.assists || []).forEach(s => {
-        const name = s.trim().toUpperCase();
-        if (!name) return;
-        if (!statsMap[name]) statsMap[name] = { goals:0, assists:0, mvp:0 };
-        statsMap[name].assists += 1;
+        const key = normName(s);
+        if (!key) return;
+        if (!rawStats[key]) rawStats[key] = { goals:0, assists:0, mvp:0 };
+        rawStats[key].assists += 1;
       });
 
       // MVP
       if (m.mvp) {
-        const name = m.mvp.trim().toUpperCase();
-        if (!statsMap[name]) statsMap[name] = { goals:0, assists:0, mvp:0 };
-        statsMap[name].mvp += 1;
+        const key = normName(m.mvp);
+        if (!rawStats[key]) rawStats[key] = { goals:0, assists:0, mvp:0 };
+        rawStats[key].mvp += 1;
       }
     });
 
-    // Also merge manual Stats sheet data if present (overrides calculated)
+    // Map normalized stats back to player names
+    statsMap = {};
+    players.forEach(p => {
+      const key = normName(p.name);
+      statsMap[p.name] = rawStats[key] || { goals:0, assists:0, mvp:0 };
+    });
+
+    // Merge manual Stats sheet (overrides auto-calculated)
     (statsData || []).forEach(s => {
-      const name = (s.jugador || s.Jugador || '').toUpperCase();
-      if (name && (s.goles || s.asistencias || s.mvp)) {
-        statsMap[name] = {
+      const rawName = s.jugador || s.Jugador || '';
+      if (!rawName) return;
+      const player = players.find(p => normName(p.name) === normName(rawName));
+      const key = player ? player.name : rawName.toUpperCase();
+      if (s.goles || s.asistencias || s.mvp) {
+        statsMap[key] = {
           goals:   parseInt(s.goles   || s.Goles)   || 0,
           assists: parseInt(s.asistencias || s.Asistencias) || 0,
           mvp:     parseInt(s.mvp     || s.MVP)     || 0
@@ -448,7 +469,10 @@ function renderCards(data) {
         <div class="player-photo-wrap">${photoHTML}</div>
       </div>
       <div class="card-body">
-        <div class="player-name">${p.name}</div>
+        <div class="player-name" style="display:flex;align-items:center;gap:8px;">
+          ${p.name}
+          ${p.injured ? '<span title="Lesionado" style="display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;background:#e05555;border-radius:50%;flex-shrink:0;" ><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="3" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg></span>' : ''}
+        </div>
         <div class="player-meta">
           <span class="player-nat">🇦🇷</span>
           <div class="dot-sep"></div>
@@ -471,8 +495,14 @@ function renderCards(data) {
       const panel = document.getElementById('cms-' + idx);
       if (!panel) return;
       const isOpen = panel.classList.contains('open');
+      // Close all other cards visually
+      document.querySelectorAll('.player-card').forEach(c => c.classList.remove('card-expanded'));
       document.querySelectorAll('.card-match-stats').forEach(el => el.classList.remove('open'));
-      if (!isOpen) panel.classList.add('open');
+      // Toggle this one
+      if (!isOpen) {
+        panel.classList.add('open');
+        card.classList.add('card-expanded');
+      }
     });
     grid.appendChild(card);
   });
@@ -505,20 +535,27 @@ function renderFixture() {
   const summary = document.getElementById('fixtureSummary');
 
   const norm = r => (r||'').toLowerCase().trim();
-  const played    = matches.filter(m => norm(m.result) !== 'pending' && norm(m.result) !== 'suspendido' && norm(m.result) !== 'suspended');
-  const upcoming  = matches.filter(m => norm(m.result) === 'pending' || norm(m.result) === 'pendiente');
+  const played    = matches.filter(m => {
+    const r = norm(m.result);
+    return r === 'win' || r === 'loss' || r === 'draw' || r === 'victoria' || r === 'derrota' || r === 'empate';
+  });
+  const upcoming  = matches.filter(m => {
+    const r = norm(m.result);
+    return r === 'pending' || r === 'pendiente' || r === 'proximo' || r === 'próximo' || r === 'suspended' || r === 'suspendido';
+  });
   const wins      = played.filter(m => norm(m.result) === 'win'  || norm(m.result) === 'victoria').length;
   const draws     = played.filter(m => norm(m.result) === 'draw' || norm(m.result) === 'empate').length;
   const losses    = played.filter(m => norm(m.result) === 'loss' || norm(m.result) === 'derrota').length;
-  const gf        = played.reduce((a, m) => a + (m.score ? parseInt(m.score.split('-')[0]) || 0 : 0), 0);
-  const ga        = played.reduce((a, m) => a + (m.score ? parseInt(m.score.split('-')[1]) || 0 : 0), 0);
+  const gf = played.reduce((a, m) => a + (m.goalsFor || 0), 0);
+  const ga = played.reduce((a, m) => a + (m.goalsAgainst || 0), 0);
   const pts       = wins * 3 + draws;
 
   summary.innerHTML = played.length
     ? `<div class="fix-sum-item"><div class="fix-sum-num win">${wins}</div><div class="fix-sum-lbl">Victorias</div></div>
        <div class="fix-sum-item"><div class="fix-sum-num draw">${draws}</div><div class="fix-sum-lbl">Empates</div></div>
        <div class="fix-sum-item"><div class="fix-sum-num loss">${losses}</div><div class="fix-sum-lbl">Derrotas</div></div>
-       <div class="fix-sum-item"><div class="fix-sum-num" style="color:var(--white)">${gf}–${ga}</div><div class="fix-sum-lbl">Goles</div></div>
+       <div class="fix-sum-item"><div class="fix-sum-num" style="color:var(--white)">${gf}</div><div class="fix-sum-lbl">Goles a favor</div></div>
+       <div class="fix-sum-item"><div class="fix-sum-num" style="color:#e05555">${ga}</div><div class="fix-sum-lbl">En contra</div></div>
        <div class="fix-sum-item"><div class="fix-sum-num" style="color:var(--gold)">${pts}</div><div class="fix-sum-lbl">Puntos</div></div>`
     : `<div class="fix-sum-item"><div class="fix-sum-num">—</div><div class="fix-sum-lbl">Victorias</div></div>
        <div class="fix-sum-item"><div class="fix-sum-num">—</div><div class="fix-sum-lbl">Empates</div></div>
@@ -542,9 +579,9 @@ function renderFixture() {
     const isLoss      = r2 === 'loss'      || r2 === 'derrota';
 
     const bc = isPending ? 'badge-pending' : isSuspended ? 'badge-suspended'
-             : isWin ? 'badge-win' : isDraw ? 'badge-draw' : 'badge-loss';
+             : isWin ? 'badge-win' : isDraw ? 'badge-draw' : isLoss ? 'badge-loss' : 'badge-pending';
     const bt = isPending ? 'Próximo' : isSuspended ? 'Suspendido'
-             : isWin ? 'Victoria' : isDraw ? 'Empate' : 'Derrota';
+             : isWin ? 'Victoria' : isDraw ? 'Empate' : isLoss ? 'Derrota' : 'Próximo';
 
     const scoreHTML = (isPending || isSuspended)
       ? '<div class="match-score-vs">VS</div>'
@@ -576,7 +613,8 @@ function renderFixture() {
       </div>`;
     }
 
-    return `<div class="match-card match-card-${m.result}" style="animation-delay:${i*0.07}s" onclick="window.toggleExpand(${i},this)">
+    const cardClass = isPending ? 'pending' : isSuspended ? 'suspended' : isWin ? 'win' : isDraw ? 'draw' : isLoss ? 'loss' : 'pending';
+    return `<div class="match-card match-card-${cardClass}" style="animation-delay:${i*0.07}s" onclick="window.toggleExpand(${i},this)">
       <div class="match-header">
         <span class="match-result-badge ${bc}">${bt}</span>
         <div class="match-teams">
